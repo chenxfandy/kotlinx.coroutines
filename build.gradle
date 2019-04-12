@@ -23,13 +23,18 @@ static def platformOf(project) {
 }
 
 buildscript {
-    ext.useKotlinSnapshot = rootProject.properties['kotlinSnapshot'] != null
-    if (useKotlinSnapshot) {
-        ext.kotlin_version = '1.2-SNAPSHOT'
+    if (build_snapshot_train) {
+        ext.kotlin_version = kotlin_snapshot_version
+        if (kotlin_version == null || kotlin_version == "") {
+            throw new IllegalArgumentException("'kotlin_snapshot_version' should be defined when building with snapshot compiler")
+        }
+
         repositories {
             maven { url "https://oss.sonatype.org/content/repositories/snapshots" }
+            mavenLocal()
         }
     }
+
     repositories {
         jcenter()
         maven { url "https://kotlin.bintray.com/kotlinx" }
@@ -43,7 +48,7 @@ buildscript {
         classpath "org.jfrog.buildinfo:build-info-extractor-gradle:$artifactory_plugin_version"
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
         classpath "org.jetbrains.dokka:dokka-gradle-plugin:$dokka_version"
-        classpath "org.jetbrains.kotlinx:atomicfu-gradle-plugin:$atomicFU_version"
+        classpath "org.jetbrains.kotlinx:atomicfu-gradle-plugin:$atomic_fu_version"
         classpath "com.jfrog.bintray.gradle:gradle-bintray-plugin:$bintray_version"
         classpath "com.moowork.gradle:gradle-node-plugin:$gradle_node_version"
 
@@ -57,17 +62,12 @@ buildscript {
 allprojects {
     // the only place where HostManager could be instantiated
     project.ext.hostManager = new HostManager()
+    def deployVersion = properties['DeployVersion']
+    if (deployVersion != null) version = deployVersion
 }
 
 allprojects {
     apply plugin: 'kotlinx-atomicfu'
-
-    def deployVersion = properties['DeployVersion']
-    if (deployVersion != null) version = deployVersion
-    if (useKotlinSnapshot) {
-        kotlin_version = '1.2-SNAPSHOT'
-    }
-
     def projectName = it.name
     repositories {
         /*
@@ -76,6 +76,10 @@ allprojects {
          */
         if (projectName == "kotlinx-coroutines-play-services") {
             google()
+        }
+        if (build_snapshot_train) {
+            maven { url "https://oss.sonatype.org/content/repositories/snapshots" }
+            mavenLocal()
         }
         jcenter()
         maven { url "https://kotlin.bintray.com/kotlin-dev" }
@@ -96,7 +100,7 @@ allprojects {
     dependencies {
         // See comment below for rationale, it will be replaced with "project" dependency
         compile "org.jetbrains.kotlinx:kotlinx-coroutines-core:$version"
-        compileOnly "org.jetbrains.kotlinx:atomicfu:$atomicFU_version"
+        compileOnly "org.jetbrains.kotlinx:atomicfu:$atomic_fu_version"
 
         // the only way IDEA can resolve test classes
         testCompile project(":$coreModule").kotlin.targets.jvm.compilations.test.output.allOutputs
@@ -107,6 +111,19 @@ allprojects {
         kotlinOptions.freeCompilerArgs += "-progressive"
         // Binary compatibility support
         kotlinOptions.freeCompilerArgs += ["-Xdump-declarations-to=${buildDir}/visibilities.json"]
+    }
+}
+
+if (build_snapshot_train) {
+    println "Hacking test tasks, removing stress and flaky tests"
+    allprojects {
+        tasks.withType(Test).all {
+            exclude '**/*LinearizabilityTest*.*'
+            exclude '**/*LFTest.*'
+            exclude '**/*StressTest.*'
+            exclude '**/*scheduler.*'
+            exclude '**/*Timeout.*'
+        }
     }
 }
 
